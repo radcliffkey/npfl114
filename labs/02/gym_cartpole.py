@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# our team IDs:
+# adf6ddd7-4724-11e9-b0fd-00505601122b
+# bd9460fd-444e-11e9-b0fd-00505601122b
+
 import argparse
 import datetime
 import os
@@ -8,10 +13,10 @@ import numpy as np
 import tensorflow as tf
 
 # Parse arguments
-# TODO: Set reasonable defaults and possibly add more arguments.
 parser = argparse.ArgumentParser()
-parser.add_argument("--batch_size", default=None, type=int, help="Batch size.")
-parser.add_argument("--epochs", default=None, type=int, help="Number of epochs.")
+parser.add_argument("--batch_size", default=10, type=int, help="Batch size.")
+parser.add_argument("--epochs", default=20, type=int, help="Number of epochs.")
+parser.add_argument("--learning_rate", default=0.1, type=float, help="Initial learning rate.")
 parser.add_argument("--threads", default=1, type=int, help="Maximum number of threads to use.")
 args = parser.parse_args()
 
@@ -37,14 +42,21 @@ with open("gym_cartpole-data.txt", "r") as data:
         labels.append(int(columns[-1]))
 observations, labels = np.array(observations), np.array(labels)
 
-# TODO: Create the model in the `model` variable.
-# However, beware that there is currently a bug in Keras which does
-# not correctly serialize InputLayer. Instead of using an InputLayer,
-# pass explicitly `input_shape` to the first real model layer.
-model = None
+learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+    initial_learning_rate=args.learning_rate,
+    decay_steps=observations.shape[0] / args.batch_size,
+    decay_rate=0.96
+)
+
+
+model = tf.keras.Sequential([
+    tf.keras.layers.Dense(32, activation=tf.nn.relu, input_shape=(4,)),
+    tf.keras.layers.Dropout(0.5),
+    tf.keras.layers.Dense(2, activation=tf.nn.softmax)
+])
 
 model.compile(
-    optimizer=tf.keras.optimizers.Adam(),
+    optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
     loss=tf.keras.losses.SparseCategoricalCrossentropy(),
     metrics=[tf.keras.metrics.SparseCategoricalAccuracy()],
 )
