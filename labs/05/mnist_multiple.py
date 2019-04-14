@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+
+# our team IDs:
+# adf6ddd7-4724-11e9-b0fd-00505601122b
+# bd9460fd-444e-11e9-b0fd-00505601122b
+
 import numpy as np
 import tensorflow as tf
 
@@ -26,7 +31,52 @@ class Network:
         #
         # Train the outputs using SparseCategoricalCrossentropy for the first two inputs
         # and BinaryCrossentropy for the third one, utilizing Adam with default arguments.
-        pass
+
+        shared_digit_input = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+
+        hidden = tf.keras.layers.Conv2D(10, 3, 2, "valid")(shared_digit_input)
+        #hidden = tf.keras.layers.BatchNormalization()(hidden)
+        hidden = tf.keras.layers.Activation(tf.nn.relu)(hidden)
+
+        hidden = tf.keras.layers.Conv2D(20, 3, 2, "valid")(hidden)
+        #hidden = tf.keras.layers.BatchNormalization()(hidden)
+        hidden = tf.keras.layers.Activation(tf.nn.relu)(hidden)
+
+        hidden = tf.keras.layers.Flatten()(hidden)
+        shared_digit_output = tf.keras.layers.Dense(200, activation=tf.nn.relu)(hidden)
+        #hidden = tf.keras.layers.Dropout(args.dropout)(hidden)
+
+        digit_model = tf.keras.Model(inputs=shared_digit_input, outputs=shared_digit_output)
+
+        shared_digit_cls = tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax)
+
+        digit1_input = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+        digit2_input = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+
+        digit1_repr = digit_model(digit1_input)
+        digit2_repr = digit_model(digit2_input)
+
+        digit1_cls = shared_digit_cls(digit1_repr)
+        digit2_cls = shared_digit_cls(digit2_repr)
+
+        diff_repr = tf.keras.layers.concatenate([digit1_repr, digit2_repr])
+        diff_hidden = tf.keras.layers.Dense(200, activation=tf.nn.relu)(diff_repr)
+        diff_output = tf.keras.layers.Dense(1, activation=tf.nn.sigmoid)(diff_hidden)
+
+        self.model = tf.keras.Model(inputs=[digit1_input, digit2_input], outputs=[digit1_cls, digit2_cls, diff_output])
+
+        self.model.compile(
+            optimizer=tf.keras.optimizers.Adam(),
+            loss=[tf.keras.losses.SparseCategoricalCrossentropy(), tf.keras.losses.SparseCategoricalCrossentropy(), tf.keras.losses.BinaryCrossentropy()],
+            metrics=[
+                tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy_dig"),
+                tf.keras.metrics.BinaryAccuracy(name="accuracy_gt")
+            ],
+        )
+
+        self.tb_callback=tf.keras.callbacks.TensorBoard(args.logdir, update_freq=1000, profile_batch=1)
+        self.tb_callback.on_train_end = lambda *_: None
+
 
     @staticmethod
     def _prepare_batches(batches_generator):
@@ -34,27 +84,42 @@ class Network:
         for batch in batches_generator:
             batches.append(batch)
             if len(batches) >= 2:
-                # TODO: yield the suitable modified inputs and targets using batches[0:2]
-                yield (model_inputs, model_targets)
+                # yield the suitable modified inputs and targets using batches[0:2]
+                yield ([batches[0]["images"], batches[1]["images"]], [batches[0]["labels"], batches[1]["labels"], batches[0]["labels"] > batches[1]["labels"]])
                 batches.clear()
 
     def train(self, mnist, args):
         for epoch in range(args.epochs):
-            # TODO: Train for one epoch using `model.train_on_batch` for each batch.
+            # Train for one epoch using `model.train_on_batch` for each batch.
             for batch in self._prepare_batches(mnist.train.batches(args.batch_size)):
-                pass
+                self.model.train_on_batch(batch[0], batch[1])
 
             # Print development evaluation
             print("Dev {}: directly predicting: {:.4f}, comparing digits: {:.4f}".format(epoch + 1, *self.evaluate(mnist.dev, args)))
 
     def evaluate(self, dataset, args):
-        # TODO: Evaluate the given dataset, returning two accuracies, the first being
+        # Evaluate the given dataset, returning two accuracies, the first being
         # the direct prediction of the model, and the second computed by comparing predicted
         # labels of the images.
-        for inputs, targets in self._prepare_batches(dataset.batches(args.batch_size)):
-            pass
+        total_cnt = 0
+        accuracy_sum = 0.0
+        indirect_accuracy_sum = 0.0
 
-        return direct_accuracy, indirect_accuracy
+        for inputs, targets in self._prepare_batches(dataset.batches(args.batch_size)):
+            digit1_pred, digit2_pred, is_gt_pred = self.model.predict_on_batch(inputs)
+            batch_size = is_gt_pred.shape[0]
+
+            digit1_pred = digit1_pred.argmax(1)
+            digit2_pred = digit2_pred.argmax(1)
+
+            is_gt_pred = is_gt_pred.flatten() >= 0.5
+            is_gt_indirect_pred = digit1_pred > digit2_pred
+
+            accuracy_sum += np.sum(is_gt_pred == targets[2])
+            indirect_accuracy_sum += np.sum(is_gt_indirect_pred == targets[2])
+            total_cnt += batch_size
+
+        return accuracy_sum / total_cnt, indirect_accuracy_sum / total_cnt
 
 
 if __name__ == "__main__":
