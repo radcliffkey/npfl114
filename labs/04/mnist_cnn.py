@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+
+# our team IDs:
+# adf6ddd7-4724-11e9-b0fd-00505601122b
+# bd9460fd-444e-11e9-b0fd-00505601122b
+
+from typing import List
+
 import numpy as np
 import tensorflow as tf
 
@@ -6,8 +13,10 @@ from mnist import MNIST
 
 # The neural network model
 class Network(tf.keras.Model):
-    def __init__(self, args):
+    def __init__(self, layers_specifications: List[str]):
         inputs = tf.keras.layers.Input(shape=[MNIST.H, MNIST.W, MNIST.C])
+
+        hidden = inputs
 
         # TODO: Add CNN layers specified by `args.cnn`, which contains
         # comma-separated list of the following layers:
@@ -23,6 +32,74 @@ class Network(tf.keras.Model):
         # - `F`: Flatten inputs. Must appear exactly once in the architecture.
         # - `D-hidden_layer_size`: Add a dense layer with ReLU activation and specified size.
         # Produce the results in variable `hidden`.
+
+        for spec in layers_specifications:
+            if spec.startswith('CB'):
+                params = spec.split(sep='-')
+                filters = int(params[1])
+                kernel_size = int(params[2])
+                stride = int(params[3])
+                padding = params[4]
+                hidden = tf.keras.layers.Convolution2D(filters=filters, kernel_size=kernel_size, strides=stride,
+                    padding=padding, use_bias=False)(hidden)
+
+                hidden = tf.keras.layers.BatchNormalization()(hidden)
+                hidden = tf.keras.layers.Activation(activation=tf.nn.relu)(hidden)
+
+            elif spec.startswith('C'):
+                params = spec.split(sep='-')
+                filters = int(params[1])
+                kernel_size = int(params[2])
+                stride = int(params[3])
+                padding = params[4]
+
+                hidden = tf.keras.layers.Convolution2D(filters=filters, kernel_size=kernel_size, strides=stride,
+                    padding=padding, activation=tf.nn.relu)(hidden)
+
+            elif spec.startswith('M'):
+                params = spec.split(sep='-')
+                kernel_size = int(params[1])
+                stride = int(params[2])
+                hidden = tf.keras.layers.MaxPooling2D(pool_size=kernel_size, strides=stride)(hidden)
+
+            elif spec.startswith('R'):
+                skip = hidden
+
+                for layer in spec.replace('R-[', '').replace(']', '').split(','):
+                    if layer.startswith('CB'):
+                        params = layer.split(sep='-')
+                        filters = int(params[1])
+                        kernel_size = int(params[2])
+                        stride = int(params[3])
+                        padding = params[4]
+
+                        hidden = tf.keras.layers.Convolution2D(filters=filters, kernel_size=kernel_size,
+                            strides=stride, padding=padding, use_bias=False)(hidden)
+
+                        hidden = tf.keras.layers.BatchNormalization()(hidden)
+                        hidden = tf.keras.layers.Activation(activation=tf.nn.relu)(hidden)
+
+                    elif layer.startswith('C'):
+                        params = layer.split(sep='-')
+                        filters = int(params[1])
+                        kernel_size = int(params[2])
+                        stride = int(params[3])
+                        padding = params[4]
+
+                        hidden = tf.keras.layers.Convolution2D(filters=filters, kernel_size=kernel_size,
+                            strides=stride,
+                            padding=padding, activation=tf.nn.relu)(hidden)
+
+                hidden = tf.keras.layers.add([hidden, skip])
+
+            elif spec.startswith('F'):
+                hidden = tf.keras.layers.Flatten()(hidden)
+
+            elif spec.startswith('D'):
+                params = spec.split(sep='-')
+                size = params[1]
+                hidden = tf.keras.layers.Dense(size, activation=tf.nn.relu)(hidden)
+
 
         # Add the final output layer
         outputs = tf.keras.layers.Dense(MNIST.LABELS, activation=tf.nn.softmax)(hidden)
@@ -85,8 +162,10 @@ if __name__ == "__main__":
     # Load the data
     mnist = MNIST()
 
+    layers_specifications = re.split(r',\s*(?![^\[\]]*\])', args.cnn)
+
     # Create the network and train
-    network = Network(args)
+    network = Network(layers_specifications)
     network.train(mnist, args)
 
     # Compute test set accuracy and print it
